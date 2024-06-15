@@ -1,33 +1,21 @@
-import asyncio
-import telegram
-import requests
-
 
 from itertools import count
 
-
+from pprint import pprint
 
 # мои модули
 from userIn import UserIn
 from amoCrmApi import Amo
 
 import logging
-from html import escape
-from uuid import uuid4
-
 from cnst import const
-from pprint import pprint
 
-from telegram import ReplyKeyboardMarkup,KeyboardButton, InlineQueryResultArticle, InputTextMessageContent,InlineKeyboardButton, InlineKeyboardMarkup,ForceReply, Update
-from telegram.constants import ParseMode
-from telegram.ext import Application, CallbackQueryHandler,CommandHandler, ContextTypes, MessageHandler, InlineQueryHandler,filters
-
-listUsers:list[UserIn] = []
+from telegram import ReplyKeyboardMarkup,KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler,CommandHandler, ContextTypes, MessageHandler, filters
+print("Стартуем")
+listUsers:dict = {}
 application = Application.builder().token("7467329508:AAFH8AbYFiEz0tY2PMaW2c7Mir18mHlH-qY").build()
 amoCrm:Amo = Amo()
-
-
-
 
 
 PositionsMenu = [
@@ -49,6 +37,7 @@ FaceMenu = [
             InlineKeyboardButton(const.UriFace, callback_data=const.UriFaceBTN),
         ],
     ]
+
 async def SendInlineMenu(update:Update,keyboard,textMessage:str)->None:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(textMessage, reply_markup=reply_markup)
@@ -60,34 +49,35 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     userTg = update.message.from_user
-    selected = False
-    for us in listUsers:
-        if us.defUser.id == userTg.id:
-            selected = True
-            break
-    if selected == False:
-        listUsers.append(UserIn(userTg))
+
+    userMy:UserIn = None
+    if(userTg.id in listUsers):
+        userMy = listUsers[userTg.id]
+    else:
+        listUsers[userTg.id]= UserIn(userTg)
+        userMy = listUsers[userTg.id]
         startMenu = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=const.createRequest)],])
-        await update.message.reply_text("Здравствуйте",reply_markup=startMenu)
+        await update.message.reply_text("Здравствуйте, нажмите \"Создать заявку\" чтобы начать формирование",reply_markup=startMenu)
+    print(userMy.toString)
+
+   
 
 async def responce(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = update.message.text
         userTg = update.message.from_user
-        selected = False
         userMy:UserIn = None
-        for us in listUsers:
-            if us.defUser.id == userTg.id:
-                selected = True
-                userMy = us
-                break
-        if selected == False:
-            listUsers.append(UserIn(userTg))
-            for us in listUsers:
-                if us.defUser.id == userTg.id:
-                    userMy = us
-                    break
+        if(userTg.id in listUsers):
+            userMy = listUsers[userTg.id]
+        else:
+            listUsers[userTg.id]= UserIn(userTg)
+            userMy = listUsers[userTg.id]
+             
+        
+        print(userMy)
+        if userMy != None : print(userMy.toString())
         if text == "custComp":
             await update.effective_message.reply_text(amoCrm.GetCustComp())
             
@@ -140,32 +130,33 @@ async def SendMessageTir(update:Update,userMy:UserIn):
 async def SendMessageINN(update:Update,userMy:UserIn):
         userMy.setAllFalse()
         userMy.printsINN = True # переходим в ожидание тиража
-        await update.effective_message.reply_text("Введите ваш ИНН")
+        await update.effective_message.reply_text("Введите название Вашей компании")
 
 async def SaveInformation(userMy:UserIn):
         amoCrm.postLead(userMy)
 
 async def SendMessageThanks(update:Update,userMy:UserIn):
         userMy.setAllFalse()
-        print(userMy.toString())
+        tgU = update.effective_message.from_user
+        if userMy != None: print(userMy.toString())
+        await update.effective_message.reply_text("Заявка отправляется...")
         await SaveInformation(userMy)
-        await update.effective_message.reply_text("Спасибо за заявку, в ближайшее время ")
+        await update.effective_message.reply_text("Спасибо за заявку, в ближайшее время наш менеджер с Вами свяжется")
+        listUsers[(tgU.id)] = UserIn(tgU)
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     userTg = update.callback_query.from_user
-    userMy = None
+    userMy:UserIn = None
+    if(userTg.id in listUsers):
+        userMy = listUsers[userTg.id]
+    else:
+        listUsers[userTg.id]= UserIn(userTg)
+        userMy = listUsers[userTg.id]
 
-    for userInList in listUsers:
-        if userTg.id == userInList.defUser.id:
-            userMy = userInList
-    if userMy == None:
-        listUsers.append(UserIn(userTg))
-        for userInList in listUsers:
-            if userTg.id == userInList.defUser.id:
-                userMy = userInList
-    
+
+    if userMy != None: print(userMy.toString())
     text = update.callback_query.data
     if text in const.dictBut_TextPositions.keys():
         print("Выбрана одна из кнопок позиций:"+const.dictBut_TextPositions[text])
@@ -176,6 +167,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             userMy.ptintsMorePosition = True
             await update.effective_message.reply_text("Опишите заказ, который Вам требуется(позиции, тираж, сроки)")
         else:
+            await update.effective_message.reply_text("Выбрана позиция:"+userMy.selectPos)
             await SendMessageTir(update,userMy)         
             #await application.bot.send_message(userTg.id,"Введите пожалуйста что-то там типа")
     if text in const.dictBut_TextFaces.keys():

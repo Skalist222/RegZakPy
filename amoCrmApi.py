@@ -1,7 +1,8 @@
-from amocrm.v2 import tokens
+from amocrm.v2 import tokens,Company,custom_field
+from amocrm.v2 import Lead as _Lead
+from amocrm.v2 import Contact as _Contact
 from amocrm_api import AmoOAuthClient # for oauth
 from datetime import datetime
-import arrow
 from userIn import UserIn
 
 class Amo:
@@ -12,16 +13,17 @@ class Amo:
     client_secret:str="yFc03gZYu0flpYmPjW1mFNJdovZYbv4Oxa2dbUmDGUakMBOaFA6wLH5RYwiuPuBt" # Секретный ключ
     redirect_url:str="https://ya.ru" # URL, который указан в интеграции (в нашем примере https://app.jaycopilot.com/)
     refresh_token:str = "def50200fce3c80e20d5a82c36c66d8cb037f9b0afd11d65e24f2f6da5bc32bf18195035d303b42b1ab8749a727e81cde244098c1af65387d632fc94dc84c21da1974a5335cccea389d7d8b174184ac824c3f421727daf7b63988387f319e1357fa612b8ac230f3b28fd193c652d75b6d0206dcf4cbe7252d72185b2ca215e25abda1395c7f462c55fa258bbfd8684da8d21be65109280b6e55239c2ea14db3f52d4628640856769284d7ba02a7e8171c17bef624e4c0ee7f971ffdc31f1aa5a73f402a7b32076adc54a946acdfb1fac109e45ce4af861acb6e2455cd4feb47633852c31e07346a923fdf25a0e7808cba370488a90ebc6540c37de972b77855fe9a8bbba3c10c33621588eca7456c167604d7727629e7994bd4fd7f32adde70449385c55bf17554f6313890b353c96371208fc57efde9182e7d5757563261d451a94948450abf6cd1ee4e90394270852bb804ac7bd1cb4fca89e171228e8c987bbc581fe99775dc181e50092d4fae767460fb39c1f627808d68bc3a87f1d49aa91d83ff829730cc5b7f86702a4fd0ec5a5b77804564b6d1682d36afa30b408439e0f7fefb1aae3fba49462acb08221df8aff4444592ce57dc7fc2ba51c70b70335211648d7e1d62405f81c6288cf5c4d5e6ab6fbd0b13d847e6dcab2a1d4" # Длинный код авторизации (действительный 20 мин.)
-    today:str = arrow.now().format('YYYY-MM-DD')
+    today:str = datetime.now().date().strftime("%Y-%m-%d")
     state = {'cookies': None}
     client:AmoOAuthClient = None # клиент амосрм
-
+    
     def __init__(self) -> None:
         self.startApiAMOCRM()
 
     
 
     def startApiAMOCRM(self) -> None:
+        
         tokens.default_token_manager(
             client_id=self.client_id,
             client_secret=self.client_secret,
@@ -32,10 +34,10 @@ class Amo:
         #генерация файлов ключей
         #tokens.default_token_manager.init(code=refresh_token, skip_error=False)
 
-       
+        self
         self.client = AmoOAuthClient(tokens.default_token_manager.get_access_token(),self.refresh_token,f"https://{self.subdomain}.amocrm.ru",self.client_id,self.client_secret,self.redirect_url)
-        dt = datetime.today().strftime("%a, %d %b %Y %H-%m-%d")
-        date_time = f"{dt} UTC"
+        
+        date_time = f"{self.today} UTC"
 
         # for Legacy client
         headers = {
@@ -43,7 +45,12 @@ class Amo:
             "Content-Type": "application/json"
         }
         self.client.update_session_params(headers)
-        self.createCustomFields()
+        res = self.client.get_contacts()
+        print("все наши клиенты:-----------------------")
+        #print(res['_embedded']['contacts'])
+        res = self.client.get_companies()
+        print("все наши компании:-----------------------")
+        #print(res['_embedded']['companies'])
     #__________________________________________
     def createContact(self,Name:str,Number:str,CompanyInn:str=None)->str:
         newContact = [
@@ -65,48 +72,27 @@ class Amo:
         return str(resAddContact)
     #__________________________________________
     def postLead(self,user:UserIn):
+        
         #329141-EMAIL in company
-        if(user.INN != ""):# если человек указал INN то мы ищем компанию в амо и если не нашли то создаем новую
-            selCompany = self.client.get_companies(limit=10, page=1,filters={'name': user.INN})
-            print(selCompany)
-            if(selCompany == {}):
-                resultCreate = self.client.create_companies(#создаем компанию
-                    [
-                        {
-                            "name": "От: "+user.name,
-                            "custom_fields_values": 
-                            [
-                                {
-                                    "field_id": 329141,
-                                    "values": [{"value": user.INN}]
-                                }
-                            ]
-                        }
-                    ])
-                idNewCompanie = str(resultCreate["_embedded"]["companies"][0]["id"])
-    #__________________________________________
-    def createCustomFields(self):
-        companiesCF = self.client.get_companies_custom_fields()
-        print("Кастомные поля компаний:\n",companiesCF)
-        #PHONE-329139,Email-329141,ADDRESS-31782302
-        if not self.findCF("INN",companiesCF):
-            self.createCFCompany("ИНН","INN")
+        # если человек указал INN то мы ищем компанию в амо и если не нашли то создаем новую
+        newContact:Contact = Contact.objects.create()
+        newContact.first_name = user.name
+        newContact.last_name = user.phone
+        newContact.phone =      user.phone
+        if(user.INN != ""):
+            newContact.company = Company(name=user.INN)
+        newContact.save()
+        newLead:Lead = Lead.objects.create()
+        if user.morePos != "" :
+            newLead.name = "Кастомная сделка: "+user.morePos
+        else:
+            newLead.name = "Товар: "+user.selectPos+"\nТираж: "+user.tir
+        newLead.contacts.add(newContact)
+        # newLead.contacts = [{"contact_id":newContact.id}]
+        newLead.save()
 
-        contactsCF = self.client.get_contacts_custom_fields()
-        print("Кастомные поля контактов:\n",contactsCF)
-        #Должность-329137,PHONE-329139,EMAIL-329141,Пол.Согл-329233
+class Lead(_Lead):
+    pass
 
-        leadsCF = self.client.get_leads_custom_fields()
-        print("Кастомные поля сделок:\n",leadsCF)
-        #тут проверка на наличие всех нужных полей в сделках
-    #__________________________________________
-    def findCF(self,code,arr:dict):
-       if any(field['code']==code for field in arr):
-           return True
-       else: 
-           return False
-    def createCFCompany(self,name,code):
-        self.client.create_companies_custom_fields([{"name":name,"code":code,"type":"text","sort": 510}])
-    def createCFContact(self,name,code):
-        self.client.create_contacts_custom_fields([{"name":name,"code":code,"type":"text", "sort": 510}])
-    #__________________________________________
+class Contact(_Contact):
+    phone = custom_field.TextCustomField("Телефон")
